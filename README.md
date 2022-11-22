@@ -1,3 +1,7 @@
+
+> It is a clone of [umlaeute/v4l2loopback](https://github.com/umlaeute/v4l2loopback) driver.<br>
+> Support `VIDIOC_EXPBUF` to export DMABUF file descriptor.
+
 v4l2loopback - a kernel module to create V4L2 loopback devices
 ==============================================================
 
