@@ -2017,17 +2017,17 @@ static int vidioc_expbuf(struct file *file, void *fh,
 
 	dev = v4l2loopback_getdevice(file);
 	opener = fh_to_opener(fh);
+
 	dmabuf_writer = GetDmabufWriter(dev);
+	if (!dmabuf_writer) {
+		dprintk("ERROR - no dmabuf writer\n");
+		return -ENOTTY;
+	}
 
 	b = &dev->buffers[expbuf->index];
 
 	switch (expbuf->type) {
 	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
-		if (!dmabuf_writer) {
-			dprintk("ERROR - no dmabuf writer\n");
-			return -EINVAL;
-		}
-
 		if (b->buffer.flags & V4L2_BUF_FLAG_MAPPED) {
 			dprintk("WARN - trying to return mapped buf[%d]\n",
 				expbuf->index);
@@ -2073,9 +2073,9 @@ static int vidioc_expbuf(struct file *file, void *fh,
 
 		return 0;
 	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
-		return -EINVAL;
+		return -ENOTTY;
 	default:
-		return -EINVAL;
+		return -ENOTTY;
 	}
 }
 
