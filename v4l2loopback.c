@@ -1928,20 +1928,24 @@ static int vidioc_dqbuf(struct file *file, void *fh, struct v4l2_buffer *buf)
 				return -EINVAL;
 			}
 		} else {
-			struct dma_buf *dmabufs =
-				dmabuf_writer->dmabuf_descs[index].dmabuf;
+			if (dmabuf_writer) {
+				struct dma_buf *dmabufs =
+					dmabuf_writer->dmabuf_descs[index]
+						.dmabuf;
+				if (!IS_ERR_OR_NULL(dmabufs)) {
+					int size = dmabuf_writer
+							   ->dmabuf_descs[index]
+							   .buffer.bytesused;
+					if (size > dev->buffer_size)
+						size = dev->buffer_size;
 
-			if (dmabuf_writer && !IS_ERR_OR_NULL(dmabufs)) {
-				int size = dmabuf_writer->dmabuf_descs[index]
-						   .buffer.bytesused;
-				if (size > dev->buffer_size)
-					size = dev->buffer_size;
-
-				if (CopyFromDmabuf(dmabufs,
-						   dev->image +
-							   b->buffer.m.offset,
-						   size))
-					return -EINVAL;
+					if (CopyFromDmabuf(
+						    dmabufs,
+						    dev->image +
+							    b->buffer.m.offset,
+						    size))
+						return -EINVAL;
+				}
 			}
 		}
 
