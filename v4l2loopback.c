@@ -25,6 +25,7 @@
 #include <linux/capability.h>
 #include <linux/eventpoll.h>
 #include <linux/dma-buf.h>
+#include <linux/align.h>
 #include <media/v4l2-ioctl.h>
 #include <media/v4l2-common.h>
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 29)
@@ -547,19 +548,24 @@ static void pix_format_set_size(struct v4l2_pix_format *f,
 				const struct v4l2l_format *fmt,
 				unsigned int width, unsigned int height)
 {
+	unsigned int aligned_width = ALIGN(width, 32);
+	unsigned int aligned_height = ALIGN(height, 32);
+
 	f->width = width;
 	f->height = height;
 
 	if (fmt->flags & FORMAT_FLAGS_PLANAR) {
-		f->bytesperline = width; /* Y plane */
-		f->sizeimage = (width * height * fmt->depth) >> 3;
+		f->bytesperline = aligned_width; /* Y plane */
+		f->sizeimage = (aligned_width * aligned_height * fmt->depth) >>
+			       3;
 	} else if (fmt->flags & FORMAT_FLAGS_COMPRESSED) {
 		/* doesn't make sense for compressed formats */
 		f->bytesperline = 0;
-		f->sizeimage = (width * height * fmt->depth) >> 3;
+		f->sizeimage = (aligned_width * aligned_height * fmt->depth) >>
+			       3;
 	} else {
-		f->bytesperline = (width * fmt->depth) >> 3;
-		f->sizeimage = height * f->bytesperline;
+		f->bytesperline = (aligned_width * fmt->depth) >> 3;
+		f->sizeimage = aligned_height * f->bytesperline;
 	}
 }
 
