@@ -2022,6 +2022,9 @@ static int vidioc_expbuf(struct file *file, void *fh,
 	dev = v4l2loopback_getdevice(file);
 	opener = fh_to_opener(fh);
 
+	if (expbuf->index < 0 || expbuf->index >= dev->used_buffers)
+		return -ENOTTY;
+
 	dmabuf_writer = GetDmabufWriter(dev);
 	if (!dmabuf_writer) {
 		dprintk("ERROR - no dmabuf writer\n");
