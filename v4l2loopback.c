@@ -1659,10 +1659,6 @@ static int vidioc_reqbufs(struct file *file, void *fh,
 	} else if (b->type == V4L2_BUF_TYPE_VIDEO_CAPTURE) {
 		if (b->count >= dev->used_buffers) {
 			b->count = dev->used_buffers;
-		} else {
-			dprintk("ERROR - reqbufs: more buffers >=%d\n",
-				dev->used_buffers);
-			return -EINVAL;
 		}
 
 		opener->buffers_number = b->count;
@@ -1741,6 +1737,15 @@ static void buffer_written(struct v4l2_loopback_device *dev,
 
 	check_timers(dev);
 	spin_unlock_bh(&dev->lock);
+}
+
+static bool MaybeDmabufReader(struct v4l2_loopback_device *dev,
+			      struct v4l2_loopback_opener *opener)
+{
+	dprintkrw("used buffers: %d, opened buffers %d\n", dev->used_buffers,
+		  opener->buffers_number);
+
+	return (dev->used_buffers == opener->buffers_number);
 }
 
 /* put buffer to queue
@@ -1904,6 +1909,7 @@ static int vidioc_dqbuf(struct file *file, void *fh, struct v4l2_buffer *buf)
 	int index;
 	struct v4l2l_buffer *b;
 	struct v4l2_loopback_opener *dmabuf_writer;
+	int capture_buf_index = -1;
 
 	dev = v4l2loopback_getdevice(file);
 	opener = fh_to_opener(fh);
@@ -1931,17 +1937,37 @@ static int vidioc_dqbuf(struct file *file, void *fh, struct v4l2_buffer *buf)
 
 		index = b->index;
 		opener->read_position = b->write_pos;
+		capture_buf_index = index;
 
 		dprintkrw("capture DQBUF pos: %d index: %d\n",
 			  opener->read_position - 1, index);
 
-		if (!(b->buffer.flags & V4L2_BUF_FLAG_MAPPED)) {
+		if (MaybeDmabufReader(dev, opener) &&
+		    !(b->buffer.flags & V4L2_BUF_FLAG_MAPPED)) {
+			// mmap expbuf capture
 			if (!dmabuf_writer) {
 				dprintk("ERROR - trying to return not mapped buf[%d]\n",
 					index);
 				return -EINVAL;
 			}
 		} else {
+			// mmap capture
+			struct v4l2l_buffer *capture_b = NULL;
+			int i;
+
+			for (i = 0; i < opener->buffers_number; i++) {
+				if (opener->opener_buffer_descs[i].queued) {
+					capture_buf_index = i;
+					break;
+				}
+			}
+			if (capture_buf_index == -1) {
+				dprintk("ERROR - capture DQBUF: no buffers\n");
+				return -EINVAL;
+			}
+
+			capture_b = &dev->buffers[capture_buf_index];
+
 			if (dmabuf_writer) {
 				struct dma_buf *dmabufs =
 					dmabuf_writer
@@ -1958,7 +1984,8 @@ static int vidioc_dqbuf(struct file *file, void *fh, struct v4l2_buffer *buf)
 					if (CopyFromDmabuf(
 						    dmabufs,
 						    dev->image +
-							    b->buffer.m.offset,
+							    capture_b->buffer.m
+								    .offset,
 						    size))
 						return -EINVAL;
 				}
@@ -1968,13 +1995,16 @@ static int vidioc_dqbuf(struct file *file, void *fh, struct v4l2_buffer *buf)
 			capture_qbuf(dev, b);
 		}
 
-		*buf = dev->buffers[index].buffer;
+		*buf = dev->buffers[capture_buf_index].buffer;
 		if (dmabuf_writer) {
 			buf->bytesused =
-				dmabuf_writer->opener_buffer_descs[index]
+				dmabuf_writer
+					->opener_buffer_descs[capture_buf_index]
 					.buffer.bytesused;
-			buf->length = dmabuf_writer->opener_buffer_descs[index]
-					      .buffer.length;
+			buf->length =
+				dmabuf_writer
+					->opener_buffer_descs[capture_buf_index]
+					.buffer.length;
 			buf->m.offset = 0;
 		}
 
@@ -1982,9 +2012,9 @@ static int vidioc_dqbuf(struct file *file, void *fh, struct v4l2_buffer *buf)
 		//	  buf->bytesused, buf->length, buf->m.offset);
 
 		unset_flags(buf);
-		check_dqbuf_count(b, false, index);
+		check_dqbuf_count(b, false, capture_buf_index);
 
-		opener->opener_buffer_descs[index].queued = false;
+		opener->opener_buffer_descs[capture_buf_index].queued = false;
 		return 0;
 	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
 		log_outbufs(dev);
