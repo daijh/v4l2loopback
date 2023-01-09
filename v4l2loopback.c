@@ -472,8 +472,9 @@ enum opener_type {
 };
 
 struct opener_buffer_desc {
-	struct dma_buf *dmabuf;
 	struct v4l2_buffer buffer;
+	struct dma_buf *dmabuf;
+	bool queued;
 };
 
 /* struct keeping state and type of opener */
@@ -1770,6 +1771,8 @@ static int vidioc_qbuf(struct file *file, void *fh, struct v4l2_buffer *buf)
 
 		capture_qbuf(dev, b);
 		set_queued(buf);
+
+		opener->opener_buffer_descs[index].queued = true;
 		return 0;
 	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
 		log_outbufs(dev);
@@ -1960,6 +1963,9 @@ static int vidioc_dqbuf(struct file *file, void *fh, struct v4l2_buffer *buf)
 						return -EINVAL;
 				}
 			}
+
+			// Return buf after copy.
+			capture_qbuf(dev, b);
 		}
 
 		*buf = dev->buffers[index].buffer;
@@ -1977,6 +1983,8 @@ static int vidioc_dqbuf(struct file *file, void *fh, struct v4l2_buffer *buf)
 
 		unset_flags(buf);
 		check_dqbuf_count(b, false, index);
+
+		opener->opener_buffer_descs[index].queued = false;
 		return 0;
 	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
 		log_outbufs(dev);
@@ -2042,6 +2050,12 @@ static int vidioc_expbuf(struct file *file, void *fh,
 	dmabuf_writer = GetDmabufWriter(dev);
 	if (!dmabuf_writer) {
 		dprintk("ERROR - no dmabuf writer\n");
+		return -ENOTTY;
+	}
+
+	if (opener->buffers_number != dmabuf_writer->buffers_number) {
+		dprintk("buffers_number (%d) is not equal dmabuf number (%d)\n",
+			opener->buffers_number, dmabuf_writer->buffers_number);
 		return -ENOTTY;
 	}
 
@@ -2958,7 +2972,7 @@ static int v4l2_loopback_add(struct v4l2_loopback_config *conf, int *ret_nr)
 			  min_buffers);
 	v4l2_ctrl_new_std(hdl, &v4l2loopback_ctrl_std_ops,
 			  V4L2_CID_MIN_BUFFERS_FOR_OUTPUT, 2, 32, 1,
-			  min_buffers);
+			  max_buffers);
 
 	if (hdl->error) {
 		err = hdl->error;
