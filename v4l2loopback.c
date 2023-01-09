@@ -471,7 +471,7 @@ enum opener_type {
 	// clang-format on
 };
 
-struct dmabuf_desc {
+struct opener_buffer_desc {
 	struct dma_buf *dmabuf;
 	struct v4l2_buffer buffer;
 };
@@ -488,7 +488,7 @@ struct v4l2_loopback_opener {
 	struct v4l2_fh fh;
 
 	int memory;
-	struct dmabuf_desc *dmabuf_descs;
+	struct opener_buffer_desc *opener_buffer_descs;
 };
 
 inline struct v4l2_loopback_opener *
@@ -801,9 +801,10 @@ static struct v4l2l_buffer *capture_dqbuf(struct v4l2_loopback_device *dev,
 static void capture_update(struct v4l2l_buffer *b, bool qbuf, int index);
 
 // dmabufs descs
-static struct dmabuf_desc *allocate_dmabuf_descs(int count);
-static void free_dmabuf_descs(struct dmabuf_desc *dmabuf_descs, int count,
-			      bool free_dmabufs);
+static struct opener_buffer_desc *allocate_opener_buffer_descs(int count);
+static void
+free_opener_buffer_descs(struct opener_buffer_desc *opener_buffer_descs,
+			 int count, bool free_dmabufs);
 
 // dmabuf copy
 static int CopyFromDmabuf(struct dma_buf *dmabuf, u8 *data, long size);
@@ -1630,9 +1631,10 @@ static int vidioc_reqbufs(struct file *file, void *fh,
 
 		opener->buffers_number = b->count;
 		if (b->memory == V4L2_MEMORY_DMABUF) {
-			opener->dmabuf_descs =
-				allocate_dmabuf_descs(opener->buffers_number);
-			if (!opener->dmabuf_descs) {
+			opener->opener_buffer_descs =
+				allocate_opener_buffer_descs(
+					opener->buffers_number);
+			if (!opener->opener_buffer_descs) {
 				return -ENOMEM;
 			}
 		}
@@ -1663,9 +1665,9 @@ static int vidioc_reqbufs(struct file *file, void *fh,
 		}
 
 		opener->buffers_number = b->count;
-		opener->dmabuf_descs =
-			allocate_dmabuf_descs(opener->buffers_number);
-		if (!opener->dmabuf_descs) {
+		opener->opener_buffer_descs =
+			allocate_opener_buffer_descs(opener->buffers_number);
+		if (!opener->opener_buffer_descs) {
 			return -ENOMEM;
 		}
 
@@ -1786,33 +1788,36 @@ static int vidioc_qbuf(struct file *file, void *fh, struct v4l2_buffer *buf)
 		b->buffer.bytesused = buf->bytesused;
 
 		if (buf->memory == V4L2_MEMORY_DMABUF) {
-			if (opener->dmabuf_descs[index].buffer.m.fd !=
+			if (opener->opener_buffer_descs[index].buffer.m.fd !=
 			    buf->m.fd) {
 				dprintk("WARN - dmabuf fd changeg: %d -> %d\n",
-					opener->dmabuf_descs[index].buffer.m.fd,
+					opener->opener_buffer_descs[index]
+						.buffer.m.fd,
 					buf->m.fd);
 
-				if (!IS_ERR_OR_NULL(opener->dmabuf_descs[index]
-							    .dmabuf)) {
+				if (!IS_ERR_OR_NULL(
+					    opener->opener_buffer_descs[index]
+						    .dmabuf)) {
 #if 0
-					dma_buf_put(opener->dmabuf_descs[index]
+					dma_buf_put(opener->opener_buffer_descs[index]
 							    .dmabuf);
 #endif
-					opener->dmabuf_descs[index].dmabuf =
-						NULL;
+					opener->opener_buffer_descs[index]
+						.dmabuf = NULL;
 				}
 
-				opener->dmabuf_descs[index].dmabuf =
+				opener->opener_buffer_descs[index].dmabuf =
 					dma_buf_get(buf->m.fd);
-				if (IS_ERR_OR_NULL(opener->dmabuf_descs[index]
-							   .dmabuf)) {
+				if (IS_ERR_OR_NULL(
+					    opener->opener_buffer_descs[index]
+						    .dmabuf)) {
 					dprintk("ERROR - invalid dmabuf fd %d\n",
 						buf->m.fd);
 					return -EINVAL;
 				}
 			}
 
-			opener->dmabuf_descs[index].buffer = *buf;
+			opener->opener_buffer_descs[index].buffer = *buf;
 		}
 
 		output_qbuf(dev, b);
@@ -1936,11 +1941,13 @@ static int vidioc_dqbuf(struct file *file, void *fh, struct v4l2_buffer *buf)
 		} else {
 			if (dmabuf_writer) {
 				struct dma_buf *dmabufs =
-					dmabuf_writer->dmabuf_descs[index]
+					dmabuf_writer
+						->opener_buffer_descs[index]
 						.dmabuf;
 				if (!IS_ERR_OR_NULL(dmabufs)) {
 					int size = dmabuf_writer
-							   ->dmabuf_descs[index]
+							   ->opener_buffer_descs
+								   [index]
 							   .buffer.bytesused;
 					if (size > dev->buffer_size)
 						size = dev->buffer_size;
@@ -1957,10 +1964,11 @@ static int vidioc_dqbuf(struct file *file, void *fh, struct v4l2_buffer *buf)
 
 		*buf = dev->buffers[index].buffer;
 		if (dmabuf_writer) {
-			buf->bytesused = dmabuf_writer->dmabuf_descs[index]
-						 .buffer.bytesused;
-			buf->length =
-				dmabuf_writer->dmabuf_descs[index].buffer.length;
+			buf->bytesused =
+				dmabuf_writer->opener_buffer_descs[index]
+					.buffer.bytesused;
+			buf->length = dmabuf_writer->opener_buffer_descs[index]
+					      .buffer.length;
 			buf->m.offset = 0;
 		}
 
@@ -1993,11 +2001,11 @@ static int vidioc_dqbuf(struct file *file, void *fh, struct v4l2_buffer *buf)
 
 		if (buf->memory == V4L2_MEMORY_DMABUF) {
 			if (IS_ERR_OR_NULL(
-				    opener->dmabuf_descs[index].dmabuf)) {
+				    opener->opener_buffer_descs[index].dmabuf)) {
 				dprintk("WARN - empty dmabuf\n"); //gst send same buffers twices
 			}
 
-			*buf = opener->dmabuf_descs[index].buffer;
+			*buf = opener->opener_buffer_descs[index].buffer;
 			dprintkrw("output DQBUF index: %d, fd: %d\n",
 				  b->buffer.index, buf->m.fd);
 		} else {
@@ -2022,8 +2030,8 @@ static int vidioc_expbuf(struct file *file, void *fh,
 	struct v4l2_loopback_opener *opener;
 	struct v4l2l_buffer *b;
 	struct v4l2_loopback_opener *dmabuf_writer;
-	struct dmabuf_desc *reader_dmabuf_desc;
-	struct dmabuf_desc *writer_dmabuf_desc;
+	struct opener_buffer_desc *reader_opener_buffer_desc;
+	struct opener_buffer_desc *writer_opener_buffer_desc;
 
 	dev = v4l2loopback_getdevice(file);
 	opener = fh_to_opener(fh);
@@ -2046,41 +2054,45 @@ static int vidioc_expbuf(struct file *file, void *fh,
 				expbuf->index);
 		}
 
-		writer_dmabuf_desc =
-			&dmabuf_writer->dmabuf_descs[expbuf->index];
-		reader_dmabuf_desc = &opener->dmabuf_descs[expbuf->index];
+		writer_opener_buffer_desc =
+			&dmabuf_writer->opener_buffer_descs[expbuf->index];
+		reader_opener_buffer_desc =
+			&opener->opener_buffer_descs[expbuf->index];
 
-		if (IS_ERR_OR_NULL(writer_dmabuf_desc->dmabuf)) {
+		if (IS_ERR_OR_NULL(writer_opener_buffer_desc->dmabuf)) {
 			dprintk("ERROR - null dmabuf\n");
 			return -EINVAL;
 		}
 
-		if (reader_dmabuf_desc->dmabuf != writer_dmabuf_desc->dmabuf) {
-			int new_fd = dma_buf_fd(writer_dmabuf_desc->dmabuf,
-						O_RDONLY);
+		if (reader_opener_buffer_desc->dmabuf !=
+		    writer_opener_buffer_desc->dmabuf) {
+			int new_fd = dma_buf_fd(
+				writer_opener_buffer_desc->dmabuf, O_RDONLY);
 			if (new_fd < 0) {
 				dprintk("ERROR - can not get fd from dmabuf\n");
 				return -EINVAL;
 			}
 
-			if (reader_dmabuf_desc->buffer.m.fd >= 0) {
+			if (reader_opener_buffer_desc->buffer.m.fd >= 0) {
 				dprintk("WARN - index %d: expbuf dmabuf fd change: %d -> %d\n",
 					expbuf->index,
-					reader_dmabuf_desc->buffer.m.fd,
+					reader_opener_buffer_desc->buffer.m.fd,
 					new_fd);
 
-				put_unused_fd(reader_dmabuf_desc->buffer.m.fd);
-				reader_dmabuf_desc->buffer.m.fd = -1;
+				put_unused_fd(
+					reader_opener_buffer_desc->buffer.m.fd);
+				reader_opener_buffer_desc->buffer.m.fd = -1;
 			} else {
 				dprintk("index %d: expbuf new dmabuf fd: %d\n",
 					expbuf->index, new_fd);
 			}
 
-			reader_dmabuf_desc->buffer.m.fd = new_fd;
-			reader_dmabuf_desc->dmabuf = writer_dmabuf_desc->dmabuf;
+			reader_opener_buffer_desc->buffer.m.fd = new_fd;
+			reader_opener_buffer_desc->dmabuf =
+				writer_opener_buffer_desc->dmabuf;
 		}
 
-		expbuf->fd = reader_dmabuf_desc->buffer.m.fd;
+		expbuf->fd = reader_opener_buffer_desc->buffer.m.fd;
 		dprintkrw("capture EXPBUF index: %d, fd %d\n", expbuf->index,
 			  expbuf->fd);
 
@@ -3617,12 +3629,12 @@ bool can_dqbuf_capture(struct v4l2_loopback_device *dev, int read_pos)
 	return true;
 }
 
-static struct dmabuf_desc *allocate_dmabuf_descs(int count)
+static struct opener_buffer_desc *allocate_opener_buffer_descs(int count)
 {
-	struct dmabuf_desc *descs = NULL;
+	struct opener_buffer_desc *descs = NULL;
 	int i;
 
-	descs = v4l2l_vzalloc(count * sizeof(struct dmabuf_desc *));
+	descs = v4l2l_vzalloc(count * sizeof(struct opener_buffer_desc *));
 	if (descs == NULL)
 		return NULL;
 
@@ -3632,8 +3644,8 @@ static struct dmabuf_desc *allocate_dmabuf_descs(int count)
 	return descs;
 }
 
-static void free_dmabuf_descs(struct dmabuf_desc *descs, int count,
-			      bool free_dmabufs)
+static void free_opener_buffer_descs(struct opener_buffer_desc *descs,
+				     int count, bool free_dmabufs)
 {
 	int i;
 
@@ -3711,7 +3723,8 @@ static void close_dmabuf_reader(struct v4l2_loopback_device *dev)
 {
 	struct v4l2_loopback_opener *reader = dev->reader;
 
-	free_dmabuf_descs(reader->dmabuf_descs, reader->buffers_number, false);
+	free_opener_buffer_descs(reader->opener_buffer_descs,
+				 reader->buffers_number, false);
 	dev->reader = NULL;
 
 	reset_outbufs_count(dev);
@@ -3721,7 +3734,8 @@ static void close_dmabuf_writer(struct v4l2_loopback_device *dev)
 {
 	struct v4l2_loopback_opener *writer = dev->writer;
 
-	free_dmabuf_descs(writer->dmabuf_descs, writer->buffers_number,
-			  (writer->memory == V4L2_MEMORY_DMABUF));
+	free_opener_buffer_descs(writer->opener_buffer_descs,
+				 writer->buffers_number,
+				 (writer->memory == V4L2_MEMORY_DMABUF));
 	dev->writer = NULL;
 }
