@@ -384,7 +384,7 @@ struct v4l2l_buffer {
 	int use_count;
 
 	// add for dmabuf
-	int write_pos;
+	int write_pos; /* number of last written frame + 1; Invalid if <= 0 */
 	int output_qbuf_count;
 	int capture_dqbuf_count;
 	int index;
@@ -1953,17 +1953,20 @@ static int vidioc_dqbuf(struct file *file, void *fh, struct v4l2_buffer *buf)
 		} else {
 			// mmap capture
 			struct v4l2l_buffer *capture_b = NULL;
-			int i;
 
-			for (i = 0; i < opener->buffers_number; i++) {
-				if (opener->opener_buffer_descs[i].queued) {
-					capture_buf_index = i;
-					break;
+			if (!MaybeDmabufReader(dev, opener)) {
+				int i;
+				for (i = 0; i < opener->buffers_number; i++) {
+					if (opener->opener_buffer_descs[i]
+						    .queued) {
+						capture_buf_index = i;
+						break;
+					}
 				}
-			}
-			if (capture_buf_index == -1) {
-				dprintk("ERROR - capture DQBUF: no buffers\n");
-				return -EINVAL;
+				if (capture_buf_index == -1) {
+					dprintk("ERROR - capture DQBUF: no buffers\n");
+					return -EINVAL;
+				}
 			}
 
 			capture_b = &dev->buffers[capture_buf_index];
@@ -1991,8 +1994,10 @@ static int vidioc_dqbuf(struct file *file, void *fh, struct v4l2_buffer *buf)
 				}
 			}
 
-			// Return buf after copy.
-			capture_qbuf(dev, b);
+			if (!MaybeDmabufReader(dev, opener)) {
+				// Return buf after copy.
+				capture_qbuf(dev, b);
+			}
 		}
 
 		*buf = dev->buffers[capture_buf_index].buffer;
@@ -2018,10 +2023,6 @@ static int vidioc_dqbuf(struct file *file, void *fh, struct v4l2_buffer *buf)
 		return 0;
 	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
 		log_outbufs(dev);
-		if (dev->used_buffers - dev->outbufs_qbuf_number >
-		    min_buffers / 2) {
-			return -EAGAIN;
-		}
 
 		b = output_dqbuf(dev);
 		if (b == NULL) {
@@ -2704,7 +2705,7 @@ static void init_buffers(struct v4l2_loopback_device *dev)
 		v4l2l_get_timestamp(b);
 
 		dev->buffers[i].index = i;
-		dev->buffers[i].write_pos = 0;
+		dev->buffers[i].write_pos = -1;
 		dev->buffers[i].output_qbuf_count = 0;
 		dev->buffers[i].capture_dqbuf_count = 0;
 	}
@@ -3498,15 +3499,17 @@ struct v4l2l_buffer *output_dqbuf(struct v4l2_loopback_device *dev)
 	}
 
 	list_for_each_entry_safe(pos, n, &dev->outbufs_list, list_head) {
-		if (pos->output_qbuf_count > 0 &&
+		if (pos->output_qbuf_count >= 0 &&
 		    pos->capture_dqbuf_count == 0) {
 			break;
 		}
 	}
+#if 0
 	if (list_entry_is_head(pos, &dev->outbufs_list, list_head)) {
 		spin_unlock_bh(&dev->lock);
 		return NULL;
 	}
+#endif
 	b = pos;
 	list_move_tail(&b->list_head, &dev->outbufs_list);
 
@@ -3607,10 +3610,6 @@ static int CopyFromDmabuf(struct dma_buf *dmabuf, u8 *data, long size)
 bool can_dqbuf_output(struct v4l2_loopback_device *dev)
 {
 	struct v4l2l_buffer *pos, *n;
-
-	if (dev->used_buffers - dev->outbufs_qbuf_number > min_buffers / 2) {
-		return false;
-	}
 
 	spin_lock_bh(&dev->lock);
 
