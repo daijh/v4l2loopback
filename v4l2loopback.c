@@ -3488,7 +3488,7 @@ struct v4l2l_buffer *output_dqbuf(struct v4l2_loopback_device *dev)
 {
 	struct v4l2l_buffer *b = NULL;
 	struct v4l2l_buffer *pos, *n;
-
+	bool found = false;
 	spin_lock_bh(&dev->lock);
 
 	if (list_empty(&dev->outbufs_list)) {
@@ -3499,8 +3499,9 @@ struct v4l2l_buffer *output_dqbuf(struct v4l2_loopback_device *dev)
 	}
 
 	list_for_each_entry_safe(pos, n, &dev->outbufs_list, list_head) {
-		if (pos->output_qbuf_count >= 0 &&
+		if (pos->output_qbuf_count > 0 &&
 		    pos->capture_dqbuf_count == 0) {
+			found = true;
 			break;
 		}
 	}
@@ -3510,6 +3511,10 @@ struct v4l2l_buffer *output_dqbuf(struct v4l2_loopback_device *dev)
 		return NULL;
 	}
 #endif
+	if (!found) {
+		spin_unlock_bh(&dev->lock);
+		return NULL;
+	}
 	b = pos;
 	list_move_tail(&b->list_head, &dev->outbufs_list);
 
