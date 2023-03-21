@@ -3516,7 +3516,8 @@ struct v4l2l_buffer *output_dqbuf(struct v4l2_loopback_device *dev)
 		return NULL;
 	}
 	b = pos;
-	list_move_tail(&b->list_head, &dev->outbufs_list);
+	// don't move the buf when dqbuf
+	//list_move_tail(&b->list_head, &dev->outbufs_list);
 
 	--dev->outbufs_qbuf_number;
 	output_update(b, false, b->index);
@@ -3541,8 +3542,9 @@ static void capture_qbuf(struct v4l2_loopback_device *dev,
 struct v4l2l_buffer *capture_dqbuf(struct v4l2_loopback_device *dev,
 				   int read_pos)
 {
-	struct list_head *p = NULL;
+	//	struct list_head *p = NULL;
 	struct v4l2l_buffer *b = NULL;
+	bool found = false;
 
 	spin_lock_bh(&dev->lock);
 
@@ -3552,15 +3554,24 @@ struct v4l2l_buffer *capture_dqbuf(struct v4l2_loopback_device *dev,
 		spin_unlock_bh(&dev->lock);
 		return NULL;
 	}
-
+#if 0
 	list_for_each(p, &dev->outbufs_list) {
 		b = list_entry(p, struct v4l2l_buffer, list_head);
 		if (b->write_pos > read_pos && b->output_qbuf_count > 0)
 			break;
 	}
-
-	if (p == &dev->outbufs_list) {
-		dprintk("WARN: read eof outbufs_list\n");
+#else
+	//fetch the latest buffer from the queue
+	list_for_each_entry_reverse(b, &dev->outbufs_list, list_head) {
+		if (b->write_pos > read_pos && b->output_qbuf_count > 0) {
+			found = true;
+			break;
+		}
+	}
+#endif
+	if (!found) {
+		dprintk("WARN: read eof outbufs_list, read_pos: %d\n",
+			read_pos);
 
 		spin_unlock_bh(&dev->lock);
 		return NULL;
@@ -3648,8 +3659,9 @@ bool can_dqbuf_output(struct v4l2_loopback_device *dev)
 
 bool can_dqbuf_capture(struct v4l2_loopback_device *dev, int read_pos)
 {
-	struct list_head *p = NULL;
+	//struct list_head *p = NULL;
 	struct v4l2l_buffer *b = NULL;
+	bool found = false;
 
 	spin_lock_bh(&dev->lock);
 
@@ -3659,7 +3671,7 @@ bool can_dqbuf_capture(struct v4l2_loopback_device *dev, int read_pos)
 		spin_unlock_bh(&dev->lock);
 		return false;
 	}
-
+#if 0
 	list_for_each(p, &dev->outbufs_list) {
 		b = list_entry(p, struct v4l2l_buffer, list_head);
 		if (b->write_pos > read_pos && b->output_qbuf_count > 0)
@@ -3672,6 +3684,19 @@ bool can_dqbuf_capture(struct v4l2_loopback_device *dev, int read_pos)
 		spin_unlock_bh(&dev->lock);
 		return false;
 	}
+#else
+	// check the latest buffer first
+	list_for_each_entry_reverse(b, &dev->outbufs_list, list_head) {
+		if (b->write_pos > read_pos && b->output_qbuf_count > 0) {
+			found = true;
+			break;
+		}
+	}
+	if (!found) {
+		spin_unlock_bh(&dev->lock);
+		return false;
+	}
+#endif
 
 	spin_unlock_bh(&dev->lock);
 	return true;
