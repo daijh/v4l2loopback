@@ -3629,7 +3629,9 @@ bool can_dqbuf_output(struct v4l2_loopback_device *dev)
 
 	spin_lock_bh(&dev->lock);
 
-	if (list_empty(&dev->outbufs_list)) {
+	// keep one buf to avoid capturer read hunger
+	// as wirter's Qbuf/DQbuf is faster than reader
+	if (list_empty(&dev->outbufs_list) || dev->outbufs_qbuf_number <= 1) {
 		dprintk("WARN: empty outbufs_list\n");
 
 		spin_unlock_bh(&dev->lock);
