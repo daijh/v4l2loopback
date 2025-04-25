@@ -549,6 +549,7 @@ static const struct v4l2l_format *format_by_fourcc(int fourcc)
 	return NULL;
 }
 
+#if 0
 static void pix_format_set_size(struct v4l2_pix_format *f,
 				const struct v4l2l_format *fmt,
 				unsigned int width, unsigned int height)
@@ -573,6 +574,7 @@ static void pix_format_set_size(struct v4l2_pix_format *f,
 		f->sizeimage = aligned_height * f->bytesperline;
 	}
 }
+#endif
 
 static int set_timeperframe(struct v4l2_loopback_device *dev,
 			    struct v4l2_fract *tpf)
@@ -1172,7 +1174,7 @@ static int vidioc_try_fmt_out(struct file *file, void *priv,
 		if (NULL == format)
 			format = &formats[0];
 
-		pix_format_set_size(&fmt->fmt.pix, format, w, h);
+		// pix_format_set_size(&fmt->fmt.pix, format, w, h);
 
 		fmt->fmt.pix.pixelformat = format->fourcc;
 
@@ -1216,7 +1218,7 @@ static int vidioc_s_fmt_out(struct file *file, void *priv,
 
 	if (!dev->ready_for_capture) {
 		dev->buffer_size = PAGE_ALIGN(dev->pix_format.sizeimage);
-		fmt->fmt.pix.sizeimage = dev->buffer_size;
+		// fmt->fmt.pix.sizeimage = dev->buffer_size;
 		ret = allocate_buffers(dev);
 	}
 	return ret;
